@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // CDP Proxy - 通过 HTTP API 操控用户日常 Chrome
-// 要求：Chrome 已开启 --remote-debugging-port
+// web-ranger 增强版：新增 Aria 树接口 + 请求日志
 // Node.js 22+（使用原生 WebSocket）
 
 import http from 'node:http';
@@ -11,10 +11,150 @@ import os from 'node:os';
 import net from 'node:net';
 
 const PORT = parseInt(process.env.CDP_PROXY_PORT || '3456');
+const LOG_FILE = process.env.CDP_LOG_FILE || path.join(process.cwd(), 'operation_log.json');
 let ws = null;
 let cmdId = 0;
 const pending = new Map(); // id -> {resolve, timer}
 const sessions = new Map(); // targetId -> sessionId
+const ariaRefs = new Map(); // targetId -> Map(refId -> { backendDOMNodeId, role, name })
+
+// --- 请求日志 ---
+const NO_LOG_PATHS = new Set(['/health', '/targets', '/logs']);
+
+function logOperation(method, pathname, params, responseSummary) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    method,
+    path: pathname,
+    params,
+    response: responseSummary,
+  };
+  try {
+    let logs = [];
+    if (fs.existsSync(LOG_FILE)) {
+      logs = JSON.parse(fs.readFileSync(LOG_FILE, 'utf-8'));
+    }
+    logs.push(entry);
+    fs.writeFileSync(LOG_FILE, JSON.stringify(logs, null, 2));
+  } catch { /* 日志写入失败不影响主流程 */ }
+}
+
+// --- Aria 树 ---
+const SKIP_ROLES = new Set([
+  'generic', 'none', 'InlineTextBox', 'LineBreak',
+  'RootWebArea', 'ignored',
+]);
+const TEXT_ROLES = new Set(['StaticText']);
+
+async function getAriaTree(sessionId, targetId) {
+  await sendCDP('Accessibility.enable', {}, sessionId);
+  const resp = await sendCDP('Accessibility.getFullAXTree', {}, sessionId);
+  const nodes = resp.result?.nodes || [];
+
+  const nodeMap = new Map();
+  for (const n of nodes) nodeMap.set(n.nodeId, n);
+
+  const refMap = new Map();
+  let refCounter = 0;
+  const lines = [];
+
+  function getVal(axValue) {
+    if (!axValue) return '';
+    return axValue.value ?? '';
+  }
+
+  function collectText(node) {
+    const parts = [];
+    const name = getVal(node.name);
+    if (name) parts.push(name);
+    if (node.childIds) {
+      for (const cid of node.childIds) {
+        const child = nodeMap.get(cid);
+        if (child && (TEXT_ROLES.has(getVal(child.role)) || child.ignored)) {
+          const t = getVal(child.name);
+          if (t && !parts.includes(t)) parts.push(t);
+        }
+      }
+    }
+    return parts.join(' ').trim();
+  }
+
+  function walk(nodeId, depth) {
+    const node = nodeMap.get(nodeId);
+    if (!node) return;
+
+    const role = getVal(node.role);
+    const ignored = node.ignored;
+
+    if (ignored || SKIP_ROLES.has(role) || TEXT_ROLES.has(role)) {
+      if (node.childIds) {
+        for (const cid of node.childIds) walk(cid, depth);
+      }
+      return;
+    }
+
+    const text = collectText(node);
+    if (!text && !node.childIds?.length) return;
+
+    const refId = `e${++refCounter}`;
+    if (node.backendDOMNodeId) {
+      refMap.set(refId, {
+        backendDOMNodeId: node.backendDOMNodeId,
+        role,
+        name: getVal(node.name),
+      });
+    }
+
+    const indent = '  '.repeat(depth);
+    const childCount = node.childIds?.filter(cid => {
+      const c = nodeMap.get(cid);
+      return c && !c.ignored && !SKIP_ROLES.has(getVal(c.role)) && !TEXT_ROLES.has(getVal(c.role));
+    }).length || 0;
+
+    let line = `${indent}[ref=${refId}] ${role}`;
+    if (text) line += `: ${text}`;
+    if (childCount > 0 && ['list', 'table', 'tablist', 'menu', 'tree', 'group', 'radiogroup'].includes(role)) {
+      line += ` (${childCount} items)`;
+    }
+    lines.push(line);
+
+    if (node.childIds) {
+      for (const cid of node.childIds) walk(cid, depth + 1);
+    }
+  }
+
+  const roots = nodes.filter(n => !nodes.some(p => p.childIds?.includes(n.nodeId)));
+  if (roots.length > 0) {
+    for (const root of roots) walk(root.nodeId, 0);
+  }
+
+  ariaRefs.set(targetId, refMap);
+  return lines.join('\n');
+}
+
+function findAriaNode(targetId, role, name) {
+  const refMap = ariaRefs.get(targetId);
+  if (!refMap) return null;
+  for (const [refId, info] of refMap) {
+    if (info.role === role && info.name && info.name.includes(name)) {
+      return { refId, ...info };
+    }
+  }
+  // 模糊匹配：只匹配 role
+  if (name === undefined || name === '') {
+    for (const [refId, info] of refMap) {
+      if (info.role === role) return { refId, ...info };
+    }
+  }
+  return null;
+}
+
+async function resolveNodeToObjectId(sessionId, backendDOMNodeId) {
+  await sendCDP('DOM.enable', {}, sessionId);
+  const resp = await sendCDP('DOM.resolveNode', { backendNodeId: backendDOMNodeId }, sessionId);
+  if (resp.result?.object?.objectId) return resp.result.object.objectId;
+  throw new Error('无法解析 DOM 节点: backendDOMNodeId=' + backendDOMNodeId);
+}
 
 // --- WebSocket 兼容层 ---
 let WS;
@@ -497,6 +637,140 @@ const server = http.createServer(async (req, res) => {
       res.end(resp.result?.result?.value || '{}');
     }
 
+    // GET /aria-tree?target=xxx - 获取压缩的 Accessibility Tree
+    else if (pathname === '/aria-tree') {
+      const sid = await ensureSession(q.target);
+      const tree = await getAriaTree(sid, q.target);
+      const refCount = ariaRefs.get(q.target)?.size || 0;
+      const result = { tree, refs: refCount };
+      if (!NO_LOG_PATHS.has(pathname)) logOperation('GET', pathname, { target: q.target }, { refs: refCount, lines: tree.split('\n').length });
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end(tree);
+      return;
+    }
+
+    // POST /click-aria?target=xxx - 按 Aria 语义点击（body: {"role":"button","name":"下一页"}）
+    else if (pathname === '/click-aria') {
+      const sid = await ensureSession(q.target);
+      const body = JSON.parse(await readBody(req));
+      if (!body.role) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '需要 role 字段' }));
+        return;
+      }
+
+      // 如果没有缓存的 aria tree，先获取一次
+      if (!ariaRefs.has(q.target)) {
+        await getAriaTree(sid, q.target);
+      }
+
+      const node = findAriaNode(q.target, body.role, body.name || '');
+      if (!node) {
+        res.statusCode = 400;
+        const result = { error: `未找到 Aria 节点: role=${body.role}, name=${body.name || '(any)'}` };
+        if (!NO_LOG_PATHS.has(pathname)) logOperation('POST', pathname, body, result);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      const objectId = await resolveNodeToObjectId(sid, node.backendDOMNodeId);
+      const clickResp = await sendCDP('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function() {
+          this.scrollIntoView({ block: 'center' });
+          this.click();
+          return { tag: this.tagName, text: (this.textContent || '').slice(0, 100) };
+        }`,
+        returnByValue: true,
+        awaitPromise: true,
+      }, sid);
+
+      const val = clickResp.result?.result?.value || {};
+      const result = { clicked: true, ref: node.refId, role: node.role, name: node.name, ...val };
+      if (!NO_LOG_PATHS.has(pathname)) logOperation('POST', pathname, body, { clicked: true, ref: node.refId });
+      res.end(JSON.stringify(result));
+    }
+
+    // POST /type-aria?target=xxx - 按 Aria 语义输入文本（body: {"role":"textbox","name":"搜索","text":"hello"}）
+    else if (pathname === '/type-aria') {
+      const sid = await ensureSession(q.target);
+      const body = JSON.parse(await readBody(req));
+      if (!body.role || body.text === undefined) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '需要 role 和 text 字段' }));
+        return;
+      }
+
+      if (!ariaRefs.has(q.target)) {
+        await getAriaTree(sid, q.target);
+      }
+
+      const node = findAriaNode(q.target, body.role, body.name || '');
+      if (!node) {
+        res.statusCode = 400;
+        const result = { error: `未找到 Aria 节点: role=${body.role}, name=${body.name || '(any)'}` };
+        if (!NO_LOG_PATHS.has(pathname)) logOperation('POST', pathname, { role: body.role, name: body.name }, result);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      const objectId = await resolveNodeToObjectId(sid, node.backendDOMNodeId);
+
+      // 聚焦 + 清空
+      await sendCDP('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function() {
+          this.scrollIntoView({ block: 'center' });
+          this.focus();
+          if ('value' in this) { this.value = ''; }
+          else if (this.isContentEditable) { this.textContent = ''; }
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+        }`,
+        awaitPromise: true,
+      }, sid);
+
+      // 输入文本
+      await sendCDP('Input.insertText', { text: body.text }, sid);
+
+      // 触发 change 事件
+      await sendCDP('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function() {
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+          this.dispatchEvent(new Event('change', { bubbles: true }));
+        }`,
+        awaitPromise: true,
+      }, sid);
+
+      const result = { typed: true, ref: node.refId, role: node.role, name: node.name, text: body.text };
+      if (!NO_LOG_PATHS.has(pathname)) logOperation('POST', pathname, { role: body.role, name: body.name, text: body.text }, { typed: true, ref: node.refId });
+      res.end(JSON.stringify(result));
+    }
+
+    // GET /logs - 读取操作日志
+    else if (pathname === '/logs' && req.method === 'GET') {
+      try {
+        if (fs.existsSync(LOG_FILE)) {
+          const logs = JSON.parse(fs.readFileSync(LOG_FILE, 'utf-8'));
+          res.end(JSON.stringify(logs, null, 2));
+        } else {
+          res.end('[]');
+        }
+      } catch {
+        res.end('[]');
+      }
+      return;
+    }
+
+    // DELETE /logs - 清空操作日志
+    else if (pathname === '/logs' && req.method === 'DELETE') {
+      try {
+        fs.writeFileSync(LOG_FILE, '[]');
+      } catch { /* ignore */ }
+      res.end(JSON.stringify({ cleared: true }));
+      return;
+    }
+
     else {
       res.statusCode = 404;
       res.end(JSON.stringify({
@@ -511,11 +785,25 @@ const server = http.createServer(async (req, res) => {
           '/info?target=': 'GET - 页面标题/URL/状态',
           '/eval?target=': 'POST body=JS表达式 - 执行 JS',
           '/click?target=': 'POST body=CSS选择器 - 点击元素',
+          '/clickAt?target=': 'POST body=CSS选择器 - 真实鼠标点击',
+          '/setFiles?target=': 'POST JSON {selector, files} - 文件上传',
           '/scroll?target=&y=&direction=': 'GET - 滚动页面',
           '/screenshot?target=&file=': 'GET - 截图',
+          '/aria-tree?target=': 'GET - Accessibility Tree（压缩语义树）',
+          '/click-aria?target=': 'POST JSON {role, name} - 按语义点击',
+          '/type-aria?target=': 'POST JSON {role, name, text} - 按语义输入',
+          '/logs': 'GET - 读取操作日志 / DELETE - 清空日志',
         },
       }));
     }
+
+    // --- 记录操作日志（排除查询类接口和已单独记录的接口）---
+    if (!NO_LOG_PATHS.has(pathname) && !['/aria-tree', '/click-aria', '/type-aria', '/logs'].includes(pathname)) {
+      const params = { ...q };
+      if (req.method === 'POST') params._body = '(see request)';
+      logOperation(req.method, pathname, params, { status: res.statusCode || 200 });
+    }
+
   } catch (e) {
     res.statusCode = 500;
     res.end(JSON.stringify({ error: e.message }));

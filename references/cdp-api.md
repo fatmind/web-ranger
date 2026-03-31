@@ -3,7 +3,7 @@
 ## 基础信息
 
 - 地址：`http://localhost:3456`
-- 启动：`node ~/.claude/skills/web-access/scripts/cdp-proxy.mjs &`
+- 启动：`node ~/.claude/skills/web-ranger/scripts/cdp-proxy.mjs &`
 - 启动后持续运行，不建议主动停止（重启需 Chrome 重新授权）
 - 强制停止：`pkill -f cdp-proxy.mjs`
 
@@ -87,6 +87,87 @@ curl -s "http://localhost:3456/scroll?target=ID&direction=bottom"
 ```bash
 curl -s "http://localhost:3456/screenshot?target=ID&file=/tmp/shot.png"
 ```
+
+## Aria 树接口（web-ranger 新增）
+
+### GET /aria-tree?target=ID
+获取压缩的 Accessibility Tree。返回纯文本，每行一个语义节点，带 `[ref=eN]` 编号和缩进层级。
+过滤无语义节点（generic/none 等），保留 heading/button/link/textbox/list 等有意义角色。
+token 消耗约为原始 DOM 的 1/20。
+
+```bash
+curl -s "http://localhost:3456/aria-tree?target=ID"
+```
+
+返回示例：
+```
+[ref=e1] heading: Example Domain
+[ref=e2] paragraph: This domain is for use in illustrative examples.
+[ref=e3] link: More information...
+```
+
+调用后会缓存 ref → DOM 节点的映射，供 `/click-aria` 和 `/type-aria` 使用。
+
+### POST /click-aria?target=ID
+按 Accessibility 语义（role + name）定位并点击元素。POST body 为 JSON。
+自动 scrollIntoView 后执行 JS click。如果没有缓存的 Aria 树，会先自动获取一次。
+
+```bash
+curl -s -X POST "http://localhost:3456/click-aria?target=ID" \
+  -d '{"role":"button","name":"下一页"}'
+```
+
+参数：
+- `role`（必填）：Aria 角色，如 `button`、`link`、`tab`、`menuitem`
+- `name`（可选）：节点名称，支持部分匹配。省略时匹配该 role 的第一个节点
+
+返回：`{ clicked, ref, role, name, tag, text }` 或 `{ error }`
+
+### POST /type-aria?target=ID
+按 Accessibility 语义定位输入框，清空已有内容后输入新文本。POST body 为 JSON。
+
+```bash
+curl -s -X POST "http://localhost:3456/type-aria?target=ID" \
+  -d '{"role":"textbox","name":"搜索","text":"iPhone 16"}'
+```
+
+参数：
+- `role`（必填）：Aria 角色，如 `textbox`、`searchbox`、`combobox`
+- `name`（可选）：节点名称
+- `text`（必填）：要输入的文本
+
+返回：`{ typed, ref, role, name, text }` 或 `{ error }`
+
+## 操作日志接口（web-ranger 新增）
+
+所有非查询类请求（排除 `/health`、`/targets`、`/logs`）自动记录到 `operation_log.json`。
+
+### GET /logs
+读取当前操作日志，返回 JSON 数组。
+
+```bash
+curl -s "http://localhost:3456/logs"
+```
+
+每条记录格式：
+```json
+{
+  "timestamp": "2026-03-28T10:30:00.000Z",
+  "method": "POST",
+  "path": "/click-aria",
+  "params": {"role": "button", "name": "下一页"},
+  "response": {"clicked": true, "ref": "e13"}
+}
+```
+
+### DELETE /logs
+清空操作日志。
+
+```bash
+curl -s -X DELETE "http://localhost:3456/logs"
+```
+
+日志文件路径可通过 `CDP_LOG_FILE` 环境变量自定义，默认为当前工作目录下的 `operation_log.json`。
 
 ## /eval 使用提示
 
