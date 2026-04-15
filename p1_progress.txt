@@ -1,0 +1,38 @@
+=== Phase 1: web-ranger 升级改造 ===
+
+状态: ✅ 全部完成
+Feature List: p1_feature_list.json (31 features)
+通过: 31/31
+
+--- Session 1 (2026-03-28) ---
+
+完成:
+1. 全局 rename web-access → web-ranger（F01-F03, F30）
+2. 删除站点经验功能（F04-F06）
+3. CDP Proxy 新增 Aria 树接口（F07-F14, F28）
+   - /aria-tree: 压缩语义树，example.com 4行 vs DOM几十行
+   - /click-aria: 按 role+name 点击，example.com "Learn more" 链接成功跳转到 IANA
+   - /type-aria: Google 搜索框输入 "hello world" 成功，覆盖输入 "new text" 成功
+   - React SPA (react.dev): 110 个语义节点，完整抓取
+4. CDP Proxy 请求日志（F15-F19）
+   - 自动记录 /new /eval /close，排除 /health /targets
+   - GET /logs 读取、DELETE /logs 清空
+   - CDP_LOG_FILE 环境变量自定义路径
+5. SKILL.md + cdp-api.md + README 更新（F20-F27）
+6. 404 端点列表包含所有新增端点（F29）
+7. 设计文档更新（F31）
+
+端到端验证:
+- Claude Code + web-ranger skill 成功抓取 SkillHub TOP 50 榜单
+- result.json: 50 条数据，5 个字段全部非空
+- 验收标准: ✅ 数量>=30 (50条) ✅ 字段非空 (50/50)
+- Claude Code 执行策略: DOM 探索 → 发现 API 端点 → 直接调用 API → 生成 result.json
+- 耗时: ~7 分钟
+
+已知问题:
+- Claude Code 本次验证中未使用 /aria-tree（它自行选择了 /eval + DOM 方式，最终发现了底层 API）
+  这符合 SKILL.md "像人一样思考" 的设计哲学——AI 有自主判断权，选择了更高效的路径
+- 手动 curl 测试已验证 /aria-tree、/click-aria、/type-aria 全部工作正常
+
+下一步:
+- Phase 2: Skill 打包（setup.sh + skill.mjs + SKILL.md + meta.json + repair.md + 内置 CDP Proxy）

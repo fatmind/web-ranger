@@ -1,0 +1,355 @@
+[
+  {
+    "id": "F01",
+    "category": "functional",
+    "description": "全局 rename：SKILL.md 中所有 web-access 引用改为 web-ranger",
+    "steps": [
+      "Step 1: 打开 web-ranger/SKILL.md",
+      "Step 2: 搜索 'web-access'，确认零匹配",
+      "Step 3: 确认 name 字段为 web-ranger",
+      "Step 4: 确认所有路径包含 web-ranger（如 ~/.claude/skills/web-ranger/）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F02",
+    "category": "functional",
+    "description": "全局 rename：README.md 中所有 web-access / eze-is 引用更新",
+    "steps": [
+      "Step 1: 打开 web-ranger/README.md",
+      "Step 2: 搜索 'web-access'，确认零匹配",
+      "Step 3: 确认安装路径、clone URL、脚本路径均为 web-ranger"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F03",
+    "category": "functional",
+    "description": "全局 rename：references/cdp-api.md 中路径更新为 web-ranger",
+    "steps": [
+      "Step 1: 打开 web-ranger/references/cdp-api.md",
+      "Step 2: 搜索 'web-access'，确认零匹配",
+      "Step 3: 确认启动命令路径为 web-ranger"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F04",
+    "category": "functional",
+    "description": "删除站点经验：SKILL.md 中移除站点经验章节",
+    "steps": [
+      "Step 1: 打开 web-ranger/SKILL.md",
+      "Step 2: 搜索 '站点经验'，确认零匹配",
+      "Step 3: 搜索 'site-patterns'，确认零匹配",
+      "Step 4: 搜索 'match-site'，确认零匹配",
+      "Step 5: 确认 References 索引中不再包含 site-patterns 条目"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F05",
+    "category": "functional",
+    "description": "删除站点经验：移除 match-site.sh 脚本",
+    "steps": [
+      "Step 1: 确认 web-ranger/scripts/match-site.sh 不存在",
+      "Step 2: 确认无其他文件引用 match-site.sh"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F06",
+    "category": "functional",
+    "description": "删除站点经验：.gitignore 移除 site-patterns 条目",
+    "steps": [
+      "Step 1: 打开 web-ranger/.gitignore",
+      "Step 2: 确认不含 site-patterns 相关行"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F07",
+    "category": "functional",
+    "description": "CDP Proxy /aria-tree 端点：返回压缩的 Accessibility Tree",
+    "steps": [
+      "Step 1: 启动 CDP Proxy",
+      "Step 2: 创建新 tab 打开测试页面：curl -s 'http://localhost:3456/new?url=https://example.com'",
+      "Step 3: 调用 aria-tree：curl -s 'http://localhost:3456/aria-tree?target=ID'",
+      "Step 4: 验证返回包含 [ref=eN] 格式的语义节点",
+      "Step 5: 验证包含 role 信息（heading / link / button 等）",
+      "Step 6: 验证包含节点文本内容",
+      "Step 7: 验证树形缩进表示层级关系",
+      "Step 8: 验证返回内容远小于原始 DOM（压缩效果）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F08",
+    "category": "functional",
+    "description": "CDP Proxy /aria-tree 端点：ref 编号全局递增，同一 tab 多次调用一致",
+    "steps": [
+      "Step 1: 调用 /aria-tree 获取结果 A",
+      "Step 2: 再次调用 /aria-tree 获取结果 B",
+      "Step 3: 验证 ref 编号稳定（同一元素 ref 相同或按序重新分配）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F09",
+    "category": "functional",
+    "description": "CDP Proxy /aria-tree 端点：过滤无意义节点，只保留有语义的节点",
+    "steps": [
+      "Step 1: 调用 /aria-tree",
+      "Step 2: 验证不包含 role=generic 等无语义节点（或已合并/省略）",
+      "Step 3: 验证 heading/link/button/textbox/list/listitem 等有意义角色保留"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F10",
+    "category": "functional",
+    "description": "CDP Proxy /click-aria 端点：按 role + name 点击元素",
+    "steps": [
+      "Step 1: 创建 tab 打开有按钮的页面",
+      "Step 2: 调用 /click-aria：curl -s -X POST 'http://localhost:3456/click-aria?target=ID' -d '{\"role\":\"link\",\"name\":\"More information...\"}'",
+      "Step 3: 验证返回 { clicked: true } 及相关信息",
+      "Step 4: 验证页面状态已变化（如导航发生）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F11",
+    "category": "functional",
+    "description": "CDP Proxy /click-aria 端点：目标不存在时返回明确错误",
+    "steps": [
+      "Step 1: 调用 /click-aria 传入不存在的 role+name",
+      "Step 2: 验证返回 400 + error 信息",
+      "Step 3: 错误信息包含 role 和 name 用于调试"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F12",
+    "category": "functional",
+    "description": "CDP Proxy /type-aria 端点：按 role + name 定位输入框并输入文本",
+    "steps": [
+      "Step 1: 创建 tab 打开有输入框的页面",
+      "Step 2: 调用 /type-aria：curl -s -X POST 'http://localhost:3456/type-aria?target=ID' -d '{\"role\":\"textbox\",\"name\":\"搜索\",\"text\":\"test input\"}'",
+      "Step 3: 验证返回成功",
+      "Step 4: 用 /eval 验证输入框值已变为 'test input'"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F13",
+    "category": "functional",
+    "description": "CDP Proxy /type-aria 端点：目标不存在时返回明确错误",
+    "steps": [
+      "Step 1: 调用 /type-aria 传入不存在的 role+name",
+      "Step 2: 验证返回 400 + error 信息"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F14",
+    "category": "functional",
+    "description": "CDP Proxy /type-aria 端点：先清空原有内容再输入（clear 行为）",
+    "steps": [
+      "Step 1: 在输入框已有内容的情况下调用 /type-aria",
+      "Step 2: 验证原有内容被清空，新文本正确输入"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F15",
+    "category": "functional",
+    "description": "CDP Proxy 请求日志：所有请求自动记录到 operation_log.json",
+    "steps": [
+      "Step 1: 启动 CDP Proxy",
+      "Step 2: 执行一系列操作：/new → /aria-tree → /click-aria → /eval → /close",
+      "Step 3: 读取 operation_log.json",
+      "Step 4: 验证每条记录包含 timestamp、method、path、params",
+      "Step 5: 验证记录顺序与实际操作顺序一致",
+      "Step 6: 验证响应摘要被记录（非完整响应体，避免日志过大）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F16",
+    "category": "functional",
+    "description": "CDP Proxy 请求日志：/health 和 /targets 等查询接口不记录日志",
+    "steps": [
+      "Step 1: 调用 /health 和 /targets 多次",
+      "Step 2: 检查 operation_log.json",
+      "Step 3: 验证这些查询请求未被记录"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F17",
+    "category": "functional",
+    "description": "CDP Proxy 请求日志：日志文件路径可通过环境变量配置",
+    "steps": [
+      "Step 1: 设置 CDP_LOG_FILE 环境变量为自定义路径",
+      "Step 2: 启动 Proxy 并执行操作",
+      "Step 3: 验证日志写入到自定义路径"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F18",
+    "category": "functional",
+    "description": "CDP Proxy 请求日志：GET /logs 端点读取当前日志",
+    "steps": [
+      "Step 1: 执行若干操作产生日志",
+      "Step 2: 调用 GET /logs",
+      "Step 3: 验证返回 JSON 数组，内容与文件一致"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F19",
+    "category": "functional",
+    "description": "CDP Proxy 请求日志：DELETE /logs 清空日志",
+    "steps": [
+      "Step 1: 产生一些日志",
+      "Step 2: 调用 DELETE /logs",
+      "Step 3: 验证日志已清空",
+      "Step 4: 调用 GET /logs 确认返回空数组"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F20",
+    "category": "functional",
+    "description": "SKILL.md 包含 Aria 树使用指导章节",
+    "steps": [
+      "Step 1: 打开 SKILL.md",
+      "Step 2: 确认包含 Aria 树相关章节",
+      "Step 3: 确认描述了 /aria-tree 的输出格式和用法",
+      "Step 4: 确认描述了 /click-aria 和 /type-aria 的用法",
+      "Step 5: 确认给出了 Aria 树优先的探索策略（先 aria-tree 再 eval）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F21",
+    "category": "functional",
+    "description": "SKILL.md 包含脚本生成指导：探索完成后 Claude Code 自行总结生成独立脚本",
+    "steps": [
+      "Step 1: 打开 SKILL.md",
+      "Step 2: 确认包含脚本生成相关章节",
+      "Step 3: 确认指导 Claude Code 在探索完成后自行总结操作步骤",
+      "Step 4: 确认指导生成独立的 Node.js 脚本（skill.mjs）",
+      "Step 5: 确认脚本应直接调用 CDP Proxy HTTP API，不依赖 AI"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F22",
+    "category": "functional",
+    "description": "SKILL.md Proxy API 章节包含新增的 Aria 接口 curl 示例",
+    "steps": [
+      "Step 1: 打开 SKILL.md",
+      "Step 2: 确认 Proxy API 章节包含 /aria-tree curl 示例",
+      "Step 3: 确认包含 /click-aria curl 示例",
+      "Step 4: 确认包含 /type-aria curl 示例"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F23",
+    "category": "functional",
+    "description": "references/cdp-api.md 包含 /aria-tree 端点文档",
+    "steps": [
+      "Step 1: 打开 cdp-api.md",
+      "Step 2: 确认包含 /aria-tree 的完整说明（方法、参数、返回格式、示例）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F24",
+    "category": "functional",
+    "description": "references/cdp-api.md 包含 /click-aria 端点文档",
+    "steps": [
+      "Step 1: 打开 cdp-api.md",
+      "Step 2: 确认包含 /click-aria 的完整说明（方法、参数、返回格式、示例）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F25",
+    "category": "functional",
+    "description": "references/cdp-api.md 包含 /type-aria 端点文档",
+    "steps": [
+      "Step 1: 打开 cdp-api.md",
+      "Step 2: 确认包含 /type-aria 的完整说明（方法、参数、返回格式、示例）"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F26",
+    "category": "functional",
+    "description": "references/cdp-api.md 包含 /logs 端点文档",
+    "steps": [
+      "Step 1: 打开 cdp-api.md",
+      "Step 2: 确认包含 GET /logs 和 DELETE /logs 的说明"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F27",
+    "category": "functional",
+    "description": "README.md 更新为 web-ranger 品牌，反映新增能力",
+    "steps": [
+      "Step 1: 打开 README.md",
+      "Step 2: 确认标题和描述为 web-ranger",
+      "Step 3: 确认能力列表包含 Aria 树相关能力",
+      "Step 4: 确认安装和使用说明已更新"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F28",
+    "category": "functional",
+    "description": "CDP Proxy /aria-tree：对 SPA 页面（React/Vue）能正确获取语义树",
+    "steps": [
+      "Step 1: 打开一个 SPA 页面（如 React 应用）",
+      "Step 2: 调用 /aria-tree",
+      "Step 3: 验证返回的语义树包含页面实际渲染的内容",
+      "Step 4: 验证动态渲染的元素也在树中"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F29",
+    "category": "functional",
+    "description": "CDP Proxy 404 端点列表包含所有新增端点",
+    "steps": [
+      "Step 1: 访问一个不存在的端点 /xxx",
+      "Step 2: 验证返回的 endpoints 列表包含 /aria-tree、/click-aria、/type-aria、/logs"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F30",
+    "category": "functional",
+    "description": "CDP Proxy check-deps.sh 路径更新为 web-ranger",
+    "steps": [
+      "Step 1: 打开 scripts/check-deps.sh",
+      "Step 2: 确认无 web-access 引用"
+    ],
+    "passes": true
+  },
+  {
+    "id": "F31",
+    "category": "functional",
+    "description": "webclaw0_design.md 设计文档已更新：反映 web-ranger 命名和调整后的流程",
+    "steps": [
+      "Step 1: 打开 webclaw0_design.md",
+      "Step 2: 确认 web-access 引用已更新为 web-ranger",
+      "Step 3: 确认脚本生成策略更新为 Claude Code 自行总结生成",
+      "Step 4: 确认阶段划分与实际计划一致"
+    ],
+    "passes": true
+  }
+]
