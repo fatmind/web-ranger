@@ -343,9 +343,9 @@
   {
     "id": "F31",
     "category": "functional",
-    "description": "webclaw0_design.md 设计文档已更新：反映 web-ranger 命名和调整后的流程",
+    "description": "webclaw3_design.md 设计文档已更新：反映 web-ranger 命名和调整后的流程",
     "steps": [
-      "Step 1: 打开 webclaw0_design.md",
+      "Step 1: 打开 webclaw3_design.md",
       "Step 2: 确认 web-access 引用已更新为 web-ranger",
       "Step 3: 确认脚本生成策略更新为 Claude Code 自行总结生成",
       "Step 4: 确认阶段划分与实际计划一致"
